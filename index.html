@@ -2435,6 +2435,7 @@ window.LANDER_CONFIG.VERSION = '1.0.0';
     }
 
     tickVisual(dt);                          // star twinkle / pad pulse clock
+    if (st) { updateCamera(st); }            // FIX: drive camera from engine state
     drawVectorScene(ctx, st, terr);          // vector raster (ctx,state,terrain)
     if (st) { render(st); }                  // HUD DOM readouts
   }
