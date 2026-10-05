@@ -2405,7 +2405,44 @@ window.LANDER_CONFIG.VERSION = '1.0.0';
     if (!booted) {
       booted = true;
       window.__LANDER_UI_BOOTED = true;
+      startLoop();
     }
+  }
+
+  /* ===================================================================
+   * 12b. MAIN FRAME LOOP — the missing glue.
+   * Drives physics + render every animation frame so the canvas is never
+   * a static void. Idempotent: exactly one rAF chain can ever exist.
+   * =================================================================== */
+  var rafId = 0;
+  var lastStamp = 0;
+
+  function frameLoop(stamp) {
+    rafId = requestAnimationFrame(frameLoop);
+
+    var dt = lastStamp ? (stamp - lastStamp) / 1000 : 1 / 60;
+    lastStamp = stamp;
+    if (!isFinite(dt) || dt <= 0) dt = 1 / 60;
+    dt = clamp(dt, 1 / 240, 0.05);
+
+    var eng = window.LanderEngine;
+    var st = null, terr = null;
+
+    if (eng && typeof eng.update === 'function') {
+      eng.update(dt);                       // advance physics, emits 'tick'
+      st   = eng.getState   ? eng.getState()   : null;
+      terr = eng.getTerrain ? eng.getTerrain() : null;
+    }
+
+    tickVisual(dt);                          // star twinkle / pad pulse clock
+    drawVectorScene(ctx, st, terr);          // vector raster (ctx,state,terrain)
+    if (st) { render(st); }                  // HUD DOM readouts
+  }
+
+  function startLoop() {
+    if (rafId) { return; }
+    lastStamp = 0;
+    rafId = requestAnimationFrame(frameLoop);
   }
 
   if (document.readyState === 'loading') {
