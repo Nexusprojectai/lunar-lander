@@ -1,0 +1,2424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b1220">
+<title>LUNAR LANDER // Vector Descent</title>
+<style>
+  /* Minimal critical fallback; full theme inlined below (styles.css) */
+  :root{--bg:#0b1220;--panel:#1e293b;--accent:#38bdf8;--text:#f8fafc;--muted:#94a3b8;--border:#334155;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;}
+  #stage{display:block;width:100%;height:100%;background:#070c17;}
+/* =====================================================================
+ * LUNAR LANDER — styles.css
+ * ---------------------------------------------------------------------
+ * Artifact owner: Vector-Render & UI Engineer (Phase 2)
+ *
+ * Theme (html-app standard, dark slate):
+ *   bg #0b1220 | cards #1e293b | accents #38bdf8 / #60a5fa
+ *   text #f8fafc | muted #94a3b8 | borders #334155
+ *
+ * Mobile-first. HUD overlays the canvas; control deck is thumb-reachable.
+ * Touch hit areas >= 44px. No layout thrash inside rAF (JS owns raster).
+ * ===================================================================== */
+
+/* ---------------------------------------------------------------
+ * 1. TOKENS
+ * --------------------------------------------------------------- */
+:root {
+  --bg:        #0b1220;
+  --void:      #070c17;
+  --card:      #1e293b;
+  --card-2:    #172033;
+  --accent:    #38bdf8;
+  --accent-2:  #60a5fa;
+  --glow:      #7dd3fc;
+  --warn:      #fbbf24;
+  --danger:    #f87171;
+  --pad:       #4ade80;
+  --text:      #f8fafc;
+  --muted:     #94a3b8;
+  --border:    #334155;
+
+  --radius:    12px;
+  --radius-sm: 8px;
+  --gap:       10px;
+  --touch:     44px;
+  --pad-deck:  12px;
+
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
+               "Liberation Mono", monospace;
+  --shadow-card: 0 6px 22px rgba(0, 0, 0, 0.45);
+  --ring-accent: 0 0 0 2px rgba(56, 189, 248, 0.55);
+}
+
+/* ---------------------------------------------------------------
+ * 2. RESET / SHELL
+ * --------------------------------------------------------------- */
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 15px;
+  line-height: 1.35;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overscroll-behavior: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  min-height: 100dvh;
+  /* subtle void vignette using flat colours only */
+  background:
+    radial-gradient(circle at 50% 12%, #101a2e 0%, var(--bg) 62%),
+    var(--bg);
+}
+
+#game.game-root {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 100dvh;
+  padding: var(--pad-deck);
+  gap: var(--gap);
+  overflow: hidden;
+}
+
+/* ---------------------------------------------------------------
+ * 3. CANVAS STAGE
+ * --------------------------------------------------------------- */
+#stage {
+  display: block;
+  width: 100%;
+  /* Canvas owns a fixed aspect box; JS only reallocates the backing
+     store when these dimensions actually change. */
+  aspect-ratio: 960 / 600;
+  min-height: 240px;
+  background: var(--void);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card), inset 0 0 60px rgba(56, 189, 248, 0.06);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ---------------------------------------------------------------
+ * 4. HUD OVERLAY
+ * --------------------------------------------------------------- */
+#hud.hud {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  padding: 12px;
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.92), rgba(23, 32, 51, 0.92));
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(6px);
+}
+
+.hud-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--gap);
+}
+
+.hud-row.hud-secondary {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.hud-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 10px;
+  background: rgba(11, 18, 32, 0.72);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.hud-label {
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hud-value {
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color 0.15s ease;
+}
+
+.hud-value.over-limit {
+  color: var(--danger);
+  animation: hud-alarm 0.7s steps(2, end) infinite;
+}
+
+@keyframes hud-alarm {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
+
+/* Primary readouts get the accent edge */
+.hud-row.hud-primary .hud-cell {
+  border-color: rgba(56, 189, 248, 0.32);
+  background: rgba(17, 26, 45, 0.8);
+}
+.hud-row.hud-primary .hud-value {
+  color: var(--accent);
+  text-shadow: 0 0 10px rgba(56, 189, 248, 0.35);
+}
+
+/* ---------------------------------------------------------------
+ * 5. FUEL GAUGE
+ * --------------------------------------------------------------- */
+#thrustBar.thrust-bar {
+  position: relative;
+  width: 100%;
+  height: 14px;
+  background: rgba(11, 18, 32, 0.9);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+#thrustBar.thrust-bar::after {
+  /* hatch ticks for a gauge feel, flat colour only */
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: repeating-linear-gradient(
+    90deg,
+    transparent 0 15px,
+    rgba(51, 65, 85, 0.55) 15px 16px
+  );
+  pointer-events: none;
+}
+
+#thrustBarFill.thrust-bar-fill {
+  height: 100%;
+  width: 100%;
+  background-color: var(--accent);
+  border-radius: 7px 0 0 7px;
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.5);
+  transition: width 0.12s linear, background-color 0.2s ease;
+  will-change: width;
+}
+
+#thrustBar.is-low #thrustBarFill {
+  box-shadow: 0 0 12px rgba(251, 191, 36, 0.5);
+}
+
+#thrustBar.is-critical #thrustBarFill {
+  box-shadow: 0 0 14px rgba(248, 113, 113, 0.6);
+  animation: fuel-critical 0.9s ease-in-out infinite;
+}
+
+@keyframes fuel-critical {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.55; }
+}
+
+/* ---------------------------------------------------------------
+ * 6. STATUS MESSAGE
+ * --------------------------------------------------------------- */
+#hudMsg.hud-msg {
+  padding: 9px 12px;
+  font-size: 12.5px;
+  letter-spacing: 0.08em;
+  text-align: center;
+  text-transform: uppercase;
+  color: var(--accent-2);
+  background: rgba(11, 18, 32, 0.85);
+  border: 1px dashed rgba(56, 189, 248, 0.35);
+  border-radius: var(--radius-sm);
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#hudMsg.hud-msg.flash {
+  animation: msg-flash 0.5s ease-out;
+}
+
+@keyframes msg-flash {
+  0%   { background: rgba(56, 189, 248, 0.28); color: var(--text); }
+  100% { background: rgba(11, 18, 32, 0.85); color: var(--accent-2); }
+}
+
+body.is-landed #hudMsg.hud-msg {
+  color: var(--pad);
+  border-color: rgba(74, 222, 128, 0.55);
+}
+body.is-crashed #hudMsg.hud-msg {
+  color: var(--danger);
+  border-color: rgba(248, 113, 113, 0.55);
+}
+body.is-paused #hudMsg.hud-msg {
+  color: var(--warn);
+  border-color: rgba(251, 191, 36, 0.5);
+}
+
+/* ---------------------------------------------------------------
+ * 7. CONTROL DECK
+ * --------------------------------------------------------------- */
+#controls.controls {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--gap);
+  padding: 10px;
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.92), rgba(23, 32, 51, 0.94));
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  /* keep the deck pinned within thumb reach on tall phones */
+  position: sticky;
+  bottom: var(--pad-deck);
+  z-index: 5;
+}
+
+.ctl-cluster {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+}
+
+.ctl-nav { justify-content: flex-start; }
+.ctl-actions { justify-content: center; flex-wrap: wrap; }
+.ctl-thrust { justify-content: flex-end; }
+
+/* ---- Buttons ---- */
+.ctl-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--touch);
+  min-height: var(--touch);
+  padding: 0 14px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  color: var(--text);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+  transition: transform 0.08s ease, background-color 0.15s ease,
+              border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ctl-btn:hover { border-color: var(--accent); }
+
+.ctl-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-accent);
+}
+
+.ctl-btn:active,
+.ctl-btn.is-active {
+  transform: translateY(1px) scale(0.98);
+  background: #24324a;
+  border-color: var(--accent);
+  box-shadow: inset 0 0 14px rgba(56, 189, 248, 0.28);
+}
+
+/* Rotation pads */
+.ctl-rotate {
+  font-size: 20px;
+  line-height: 1;
+  min-width: var(--touch);
+  min-height: var(--touch);
+  color: var(--accent);
+  border-color: rgba(56, 189, 248, 0.4);
+}
+
+.ctl-rotate.is-active {
+  background: rgba(56, 189, 248, 0.2);
+  color: var(--glow);
+}
+
+/* Primary action */
+.ctl-primary {
+  color: var(--bg);
+  background: linear-gradient(180deg, var(--accent), var(--accent-2));
+  border-color: var(--accent);
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.35);
+  font-weight: 800;
+}
+.ctl-primary:hover { filter: brightness(1.06); }
+.ctl-primary:active,
+.ctl-primary.is-active {
+  filter: brightness(0.92);
+  box-shadow: inset 0 0 14px rgba(0, 0, 0, 0.35);
+}
+
+/* Ghost / secondary */
+.ctl-ghost {
+  color: var(--muted);
+  background: transparent;
+  border-color: var(--border);
+}
+.ctl-ghost:hover { color: var(--text); border-color: var(--accent); }
+
+/* Main thrust — widest, most thumbable */
+.ctl-thrust-btn {
+  min-width: 132px;
+  min-height: 56px;
+  font-size: 14px;
+  letter-spacing: 0.12em;
+  color: var(--text);
+  background: linear-gradient(180deg, #24324a, #1a2438);
+  border-color: rgba(125, 211, 252, 0.45);
+  box-shadow: 0 0 18px rgba(56, 189, 248, 0.18);
+}
+
+.ctl-thrust-btn.is-active {
+  background: linear-gradient(180deg, var(--accent), var(--accent-2));
+  color: var(--bg);
+  border-color: var(--glow);
+  box-shadow: 0 0 26px rgba(56, 189, 248, 0.65);
+  transform: translateY(1px) scale(0.985);
+}
+
+/* ---------------------------------------------------------------
+ * 8. RESPONSIVE
+ * --------------------------------------------------------------- */
+
+/* Short/landscape phones: canvas shrinks, deck goes full-width bottom. */
+@media (max-height: 640px) and (orientation: landscape) {
+  #stage { aspect-ratio: auto; min-height: 0; flex: 1 1 auto; }
+  #hud.hud {
+    position: absolute;
+    top: var(--pad-deck);
+    left: var(--pad-deck);
+    right: var(--pad-deck);
+    background: rgba(11, 18, 32, 0.72);
+    pointer-events: none;
+  }
+  #hud.hud .hud-row.hud-secondary { grid-template-columns: repeat(2, 1fr); }
+  #controls.controls { position: static; }
+}
+
+/* Tablet and up: wider gutters, 5-up HUD row. */
+@media (min-width: 720px) {
+  :root { --pad-deck: 16px; --gap: 12px; }
+  .hud-row { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .hud-row.hud-secondary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    max-width: 40%;
+  }
+  .hud-value { font-size: 20px; }
+  #stage { max-height: 62dvh; }
+  #controls.controls { position: static; }
+}
+
+/* Desktop: centre the app, cap width, roomy deck. */
+@media (min-width: 1024px) {
+  #game.game-root {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 22px;
+  }
+  #stage { max-height: 66dvh; }
+  .ctl-thrust-btn { min-width: 168px; min-height: 60px; }
+  .hud-label { font-size: 10px; }
+  .hud-value { font-size: 22px; }
+}
+
+/* Very small phones: tighten HUD type so nothing clips. */
+@media (max-width: 380px) {
+  .hud-value { font-size: 15px; }
+  .hud-cell { padding: 6px 7px; }
+  #controls.controls { grid-template-columns: auto 1fr; }
+  .ctl-actions { grid-column: 1 / -1; order: 3; }
+  .ctl-thrust-btn { min-width: 100%; }
+}
+
+/* ---------------------------------------------------------------
+ * 9. MOTION / A11Y
+ * --------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .ctl-btn { border-width: 2px; }
+  .hud-label { color: var(--text); }
+  #thrustBar.thrust-bar { border-width: 2px; }
+}
+
+/* High-contrast focus ring for keyboard users on the deck. */
+.ctl-btn:focus-visible { outline: 2px solid var(--glow); outline-offset: 2px; }
+
+</style>
+</head>
+<body>
+
+<!-- ============ ROOT APP SHELL (Phase 1 Foundation) ============ -->
+<div id="game" class="game-root">
+
+  <!-- Vector CRT stage -->
+  <canvas id="stage" width="960" height="600" aria-label="Lunar Lander vector display"></canvas>
+
+  <!-- ============ HUD OVERLAY ============ -->
+  <div id="hud" class="hud">
+    <div class="hud-row hud-primary">
+      <div class="hud-cell"><span class="hud-label">ALTITUDE</span><span class="hud-value" id="hudAlt">0</span></div>
+      <div class="hud-cell"><span class="hud-label">H-VELOCITY</span><span class="hud-value" id="hudHvel">0.0</span></div>
+      <div class="hud-cell"><span class="hud-label">V-VELOCITY</span><span class="hud-value" id="hudVvel">0.0</span></div>
+    </div>
+    <div class="hud-row hud-secondary">
+      <div class="hud-cell"><span class="hud-label">FUEL</span><span class="hud-value" id="hudFuel">100</span></div>
+      <div class="hud-cell"><span class="hud-label">SCORE</span><span class="hud-value" id="hudScore">0</span></div>
+    </div>
+
+    <!-- Fuel gauge -->
+    <div id="thrustBar" class="thrust-bar" role="meter" aria-label="Fuel remaining" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100">
+      <div id="thrustBarFill" class="thrust-bar-fill"></div>
+    </div>
+
+    <!-- Status / message ticker -->
+    <div id="hudMsg" class="hud-msg" role="status" aria-live="polite">TAP PLAY TO BEGIN DESCENT</div>
+  </div>
+
+  <!-- ============ TOUCH / CONTROL DECK ============ -->
+  <div id="controls" class="controls">
+    <div class="ctl-cluster ctl-nav">
+      <button id="btnLeft"   class="ctl-btn ctl-rotate" aria-label="Rotate left">&#8630;</button>
+      <button id="btnRight"  class="ctl-btn ctl-rotate" aria-label="Rotate right">&#8631;</button>
+    </div>
+    <div class="ctl-cluster ctl-actions">
+      <button id="btnPlay"   class="ctl-btn ctl-primary" aria-label="Play">PLAY</button>
+      <button id="btnPause"  class="ctl-btn ctl-ghost"   aria-label="Pause">PAUSE</button>
+      <button id="btnReset"  class="ctl-btn ctl-ghost"   aria-label="Reset">RESET</button>
+    </div>
+    <div class="ctl-cluster ctl-thrust">
+      <button id="btnThrust" class="ctl-btn ctl-thrust-btn" aria-label="Main thrust">THRUST &#9650;</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- ============ GLOBAL CONFIG CONTRACT (window.LANDER_CONFIG) ============ -->
+<script>
+/* ------------------------------------------------------------------
+ * LANDER_CONFIG — canonical physics + tuning constants.
+ * Every downstream module (engine.js, ui.js) MUST read from this object
+ * instead of hard-coding magic numbers.
+ * ------------------------------------------------------------------ */
+window.LANDER_CONFIG = {
+  /* ---- Environment (lunar) ---- */
+  gravity:        0.06,   // px/s^2 constant downward acceleration (weak lunar g), dt-scaled
+  gravityScale:   1.0,    // global multiplier for lunar vs earth demonstrations
+
+  /* ---- Propulsion ---- */
+  thrustPower:    0.28,   // px/s^2 acceleration along lander facing when throttle = 1
+  maxThrottle:    1.0,    // throttle clamp (0..1)
+
+  /* ---- Fuel model ---- */
+  startFuel:      1000,   // starting fuel units
+  fuelBurnRate:   12.0,   // fuel units / second at full throttle
+  rotFuelCost:    1.2,    // fuel units / second while rotating (tiny but non-zero)
+
+  /* ---- Rotation ---- */
+  rotSpeed:       2.6,    // rad/s angular velocity applied while left/right held
+  maxRotSpeed:    3.4,    // hard clamp on |angular velocity| (rad/s)
+
+  /* ---- Landing tolerance envelope ---- */
+  maxSafeVvel:    28,     // max |vertical velocity| (px/s, downward) for a safe touch
+  maxSafeHvel:    12,     // max |horizontal velocity| (px/s) for a safe touch
+  maxSafeAngle:   8,      // max |tilt from upright| in DEGREES for a safe touch
+
+  /* ---- Lander geometry ---- */
+  landerW:        16,     // lander body width (px)
+  landerH:        20,     // lander body height (px)
+  landerLegSpan:  11,     // half-span to foot pads (px)
+
+  /* ---- Camera / world ---- */
+  worldScroll:    true,   // terrain scrolls while lander stays near-horizontal-center
+  holdCenterX:    0.5,    // lander keeps this x-fraction of viewport width
+  terrainScrollEase: 0.85,// horizontal follow damping
+
+  /* ---- Terrain generation ---- */
+  terrainSegMin:  18,     // min px between terrain points
+  terrainSegMax:  46,     // max px between terrain points
+  terrainJagMin:  -70,    // max upward step
+  terrainJagMax:  110,    // max downward step
+  padCount:       4,      // number of flat landing pads per repeating chunk
+  pads: [                 // flat pads: half-width px + score multiplier
+    { halfWidth: 26, value: 100 },
+    { halfWidth: 22, value: 200 },
+    { halfWidth: 18, value: 300 },
+    { halfWidth: 14, value: 500 }
+  ],
+
+  /* ---- Scoring ---- */
+  scoreBase:      100,    // baseline points on a successful touchdown
+  scoreFuelBonus: 2,      // points per remaining fuel unit (scaled)
+  scoreSoftLandingBonus: 250, // bonus for touching down |vvel| < half safe limits
+
+  /* ---- Presentation / palette (consumed by ui.js) ---- */
+  colors: {
+    bg:       '#0b1220',
+    void:     '#070c17',
+    stroke:   '#38bdf8',   // vector line accent
+    strokeDim:'#1e4d6b',   // dim terrain
+    glow:     '#7dd3fc',
+    warn:     '#fbbf24',
+    danger:   '#f87171',
+    pad:      '#4ade80',
+    text:     '#f8fafc',
+    muted:    '#94a3b8'
+  },
+
+  /* ---- Render performance ---- */
+  targetFpsMobile: 32,    // ui.js throttles raster on mobile
+  targetFpsDesk:   60,
+  dprCapMobile:    1.5,
+  dprCapDesk:      2.0,
+  liteModeThresholdWidth: 820
+};
+
+/* Expose a frozen-ish reference alias for defensive reads */
+window.LANDER_CONFIG.VERSION = '1.0.0';
+</script>
+
+<!-- ============ DOWNSTREAM MODULES (owned by Phase 2 specialists) ============ -->
+<script>
+/* ============================================================================
+ * engine.js — LUNAR LANDER :: Physics & Game-Loop Engine
+ * ----------------------------------------------------------------------------
+ * Implements window.LanderEngine exactly per CONTRACT.md (Phase 1).
+ *
+ * PUBLIC API (frozen shape):
+ *   init(stage, config)            -> void   // stage may be null (pure logic)
+ *   reset()                        -> void
+ *   update(dt)                     -> void   // dt in SECONDS
+ *   start()                        -> void
+ *   pause()                        -> void
+ *   isPaused()                     -> boolean
+ *   getState()                     -> State
+ *   setInput({left,right,thrust})  -> void
+ *   on(callback)                   -> void   // subscriber fired once per update()
+ *
+ * NO DOM RENDERING HAPPENS HERE. This module owns only numeric state, the
+ * terrain model, collision resolution, landing adjudication, scoring and
+ * best-score persistence. ui.js consumes getState() and draws everything.
+ * ==========================================================================*/
+(function (window, undefined) {
+  'use strict';
+
+  /* ------------------------------------------------------------------ *
+   * 0. Small math/util helpers (module-private)
+   * ------------------------------------------------------------------ */
+  var TAU = Math.PI * 2;
+  var DEG = 180 / Math.PI;
+
+  function clamp(v, lo, hi) {
+    return v < lo ? lo : (v > hi ? hi : v);
+  }
+  function lerp(a, b, t) { return a + (b - a) * t; }
+
+  /** Normalize an angle in radians into (-PI, PI]. */
+  function normalizeAngle(a) {
+    a = a % TAU;
+    if (a > Math.PI) a -= TAU;
+    else if (a <= -Math.PI) a += TAU;
+    return a;
+  }
+
+  /** Deterministic-ish PRNG (mulberry32) so terrain is reproducible per seed. */
+  function makeRng(seed) {
+    var s = (seed | 0) || 0x9e3779b9;
+    return function () {
+      s |= 0; s = (s + 0x6D2B79F5) | 0;
+      var t = Math.imul(s ^ (s >>> 15), 1 | s);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 1. Config resolution — read from LANDER_CONFIG, with safe defaults.
+   *    Never mutate window.LANDER_CONFIG.
+   * ------------------------------------------------------------------ */
+  var FALLBACK = {
+    gravity: 0.06, gravityScale: 1.0,
+    thrustPower: 0.28, maxThrottle: 1.0,
+    startFuel: 1000, fuelBurnRate: 12.0, rotFuelCost: 1.2,
+    rotSpeed: 2.6, maxRotSpeed: 3.4,
+    maxSafeVvel: 28, maxSafeHvel: 12, maxSafeAngle: 8,
+    landerW: 16, landerH: 20, landerLegSpan: 11,
+    worldScroll: true, holdCenterX: 0.5, terrainScrollEase: 0.85,
+    terrainSegMin: 18, terrainSegMax: 46, terrainJagMin: -70, terrainJagMax: 110,
+    padCount: 4,
+    pads: [{ halfWidth: 26, value: 100 }, { halfWidth: 22, value: 200 },
+           { halfWidth: 18, value: 300 }, { halfWidth: 14, value: 500 }],
+    scoreBase: 100, scoreFuelBonus: 2, scoreSoftLandingBonus: 250,
+    colors: { bg: '#0b1220', void: '#070c17', stroke: '#38bdf8', strokeDim: '#1e4d6b',
+              glow: '#7dd3fc', warn: '#fbbf24', danger: '#f87171', pad: '#4ade80',
+              text: '#f8fafc', muted: '#94a3b8' },
+    targetFpsMobile: 32, targetFpsDesk: 60, dprCapMobile: 1.5, dprCapDesk: 2.0,
+    liteModeThresholdWidth: 820, VERSION: '1.0.0'
+  };
+
+  function resolveConfig(cfg) {
+    var src = (cfg && typeof cfg === 'object') ? cfg : {};
+    var out = {};
+    var k;
+    for (k in FALLBACK) {
+      if (Object.prototype.hasOwnProperty.call(FALLBACK, k)) {
+        out[k] = (src[k] === undefined || src[k] === null) ? FALLBACK[k] : src[k];
+      }
+    }
+    // Always keep the caller's full object reachable (read-only usage).
+    out.colors = (src.colors && typeof src.colors === 'object') ? src.colors : FALLBACK.colors;
+    out.pads = (src.pads && src.pads.length) ? src.pads : FALLBACK.pads;
+    out.padCount = clamp(out.padCount | 0, 2, 4);
+    return out;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 2. Internal state
+   * ------------------------------------------------------------------ */
+  var CFG = resolveConfig(window.LANDER_CONFIG);
+  var stage = null;
+
+  var WORLD_W = 960;          // intrinsic canvas width  (contract)
+  var WORLD_H = 600;          // intrinsic canvas height (contract)
+  var MIN_PAD_GAP = 150;      // min flat run between adjacent pads
+  var START_APRON = 0;        // x of the flat launch apron (world left edge)
+  var TERRAIN_AHEAD = 4200;   // px of terrain generated beyond camera right
+  var TERRAIN_BEHIND = 1400;  // px of terrain kept alive behind camera left
+  var SAFE_ZONE_TAIL = 460;   // flat barren apron to the right of the last pad
+
+  var state = null;
+  var terrain = [];           // sorted array of points {x,y,pad}
+  var pads = [];              // flat pad records {x0,x1,y,value,halfWidth,index}
+  var seedCounter = 0;
+  var lastTerrainX = 0;
+  var lastTerrainY = 0;
+
+  var subscribers = [];
+  var lastMessage = 'TAP PLAY TO BEGIN DESCENT';
+
+  var BEST_KEY = 'lunarlander.best.v1';
+
+  /* ------------------------------------------------------------------ *
+   * 3. localStorage best-score persistence (defensive: may be unavailable)
+   * ------------------------------------------------------------------ */
+  function readBest() {
+    try {
+      if (!window.localStorage) return 0;
+      var v = window.localStorage.getItem(BEST_KEY);
+      var n = parseInt(v, 10);
+      return isFinite(n) && n > 0 ? n : 0;
+    } catch (e) { return 0; }
+  }
+  function writeBest(v) {
+    try {
+      if (!window.localStorage) return;
+      window.localStorage.setItem(BEST_KEY, String(v | 0));
+    } catch (e) { /* private mode / quota — silently ignore */ }
+  }
+
+  var bestScore = readBest();
+  function commitBest() {
+    if (state && state.score > bestScore) {
+      bestScore = state.score | 0;
+      writeBest(bestScore);
+    }
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 4. Procedural rugged terrain generation
+   *    - Repeating jagged mountain profile via summed octaves of noise-like
+   *      random walk, clamped to terrainJagMin/Max step bounds.
+   *    - 2..4 flat landing pads carved at pseudorandom positions, each with
+   *      a point value from CFG.pads, ascending difficulty toward the right.
+   * ------------------------------------------------------------------ */
+  function carvePad(rng, value, halfWidth, index) {
+    // Choose a centre x at least MIN_PAD_GAP from the previous pad edge, and
+    // always strictly ahead of the running terrain frontier.
+    var prevEdge = pads.length ? pads[pads.length - 1].x1 : START_APRON;
+    var minX = Math.max(prevEdge + MIN_PAD_GAP + halfWidth, lastTerrainX + MIN_PAD_GAP + halfWidth);
+    var span = 260;                                   // search window
+    var cx = minX + rng() * span;
+
+    // Terrain height under the pad: bias low (valleys are safer-looking).
+    var relY = 0.42 + rng() * 0.42;                   // 0..1 normalized
+    var padY = clamp(
+      lastTerrainY + (relY - 0.5) * 2 * (CFG.terrainJagMax * 0.7),
+      CFG.terrainJagMin * 0.9,
+      CFG.terrainJagMax * 0.85
+    );
+
+    // --- flat platform: two identical-height endpoints + pad record ---
+    var x0 = cx - halfWidth;
+    var x1 = cx + halfWidth;
+    var pad = { x0: x0, x1: x1, y: padY, value: value, halfWidth: halfWidth, index: index };
+    pads.push(pad);
+
+    terrain.push({ x: x0, y: padY, pad: pad });
+    terrain.push({ x: x1, y: padY, pad: pad });
+
+    lastTerrainX = x1;
+    lastTerrainY = padY;
+  }
+
+  /**
+   * (Re)generate the whole terrain field for a fresh run.
+   * Uses the supplied seed so a run is reproducible.
+   */
+  function generateTerrain(seed) {
+    terrain = [];
+    pads = [];
+    var rng = makeRng(seed);
+
+    // ------- 4a. flat launch apron (left edge of the world) -------
+    var startX = 0;
+    var startY = 0;
+    terrain.push({ x: startX, y: startY, pad: null });
+    lastTerrainX = startX;
+    lastTerrainY = startY;
+
+    // ------- 4b. number of pads 2..4 -------
+    var nPads = clamp(CFG.padCount | 0, 2, 4);
+    var padDefs = CFG.pads.slice(0, nPads);
+
+    // ------- 4c. mountains up to + across + past the pads -------
+    for (var i = 0; i < nPads; i++) {
+      // Lead-in: a stretch of rugged mountains before each pad.
+      var leadSegs = 4 + Math.floor(rng() * 5);       // 4..8 segments
+      for (var s = 0; s < leadSegs; s++) {
+        stepTerrain(rng, /*allowPad*/ false);
+      }
+      carvePad(rng, padDefs[i].value, padDefs[i].halfWidth, i);
+    }
+
+    // ------- 4d. safe trailing apron: flat ground after the last pad -------
+    var tailY = lastTerrainY;
+    terrain.push({ x: lastTerrainX + SAFE_ZONE_TAIL, y: tailY, pad: null });
+    lastTerrainX += SAFE_ZONE_TAIL;
+    lastTerrainY = tailY;
+
+    // ------- 4e. keep it deterministic; sort defensively -------
+    terrain.sort(function (a, b) { return a.x - b.x; });
+  }
+
+  /** Append one rugged terrain segment continuing from lastTerrainX/Y. */
+  function stepTerrain(rng, allowPad) {
+    var segLen = lerp(CFG.terrainSegMin, CFG.terrainSegMax, rng());
+    var jag = lerp(CFG.terrainJagMin, CFG.terrainJagMax, rng());
+    // Bias the profile into a plausible mountain silhouette: pull toward 0
+    // when we've been climbing a long time, so peaks self-limit.
+    var y = clamp(lastTerrainY + jag,
+                  CFG.terrainJagMin * 1.6,
+                  CFG.terrainJagMax * 1.4);
+    var x = lastTerrainX + segLen;
+
+    terrain.push({ x: x, y: y, pad: null });
+    lastTerrainX = x;
+    lastTerrainY = y;
+  }
+
+  /**
+   * Extend terrain lazily to cover [xNeed, +inf). Called from update() as the
+   * camera scrolls right. Terrain is infinite (repeating chunks).
+   */
+  function extendTerrainTo(xNeed) {
+    if (!isFinite(xNeed) || xNeed <= lastTerrainX) return;
+
+    // Continue with rugged mountains; periodically re-open a pad cluster so
+    // the world truly "repeats" with jagged mountains + new pads.
+    var rng = makeRng((lastTerrainX | 0) ^ (seedCounter * 2654435761));
+
+    // Hard iteration ceiling: each step advances lastTerrainX by >= terrainSegMin,
+    // so this can never legitimately exceed (span / terrainSegMin) + slack.
+    var maxSteps = Math.ceil((xNeed - lastTerrainX) / Math.max(1, CFG.terrainSegMin)) + 64;
+    var steps = 0;
+
+    while (lastTerrainX < xNeed && steps++ < maxSteps) {
+      var beforeX = lastTerrainX;
+      // Occasionally sprinkle a fresh pad (infinite replay value).
+      if (rng() < 0.16) {
+        var pi = pads.length % CFG.pads.length;
+        var pd = CFG.pads[pi];
+        carvePad(rng, pd.value, pd.halfWidth, pads.length);
+      } else {
+        stepTerrain(rng, false);
+      }
+      // Monotonicity guard: every generator MUST advance the frontier.
+      if (lastTerrainX <= beforeX) {
+        lastTerrainX = beforeX + Math.max(1, CFG.terrainSegMin);
+      }
+    }
+
+    // Prune terrain far behind the camera so memory stays bounded.
+    pruneTerrain();
+  }
+
+  function pruneTerrain() {
+    if (!state) return;
+    var cutoff = state.cameraX - TERRAIN_BEHIND;
+    var drop = 0, i;
+    for (i = 0; i < terrain.length; i++) {
+      if (terrain[i].x < cutoff) drop++; else break;
+    }
+    if (drop > 2) {
+      terrain.splice(0, drop - 1);          // keep 1 overlap point for continuity
+    }
+    // Prune pad records fully behind the cut.
+    var keptPads = [];
+    for (i = 0; i < pads.length; i++) {
+      if (pads[i].x1 >= cutoff) keptPads.push(pads[i]);
+    }
+    pads = keptPads;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 5. Terrain sampling / collision queries
+   * ------------------------------------------------------------------ */
+
+  /** Linear-interpolated terrain surface height at world x. */
+  function terrainYAt(x) {
+    if (!terrain.length) return 0;
+    if (x <= terrain[0].x) return terrain[0].y;
+    var n = terrain.length;
+    if (x >= terrain[n - 1].x) return terrain[n - 1].y;
+
+    // Binary search for the bracketing pair.
+    var lo = 0, hi = n - 1;
+    while (hi - lo > 1) {
+      var mid = (lo + hi) >> 1;
+      if (terrain[mid].x <= x) lo = mid; else hi = mid;
+    }
+    var a = terrain[lo], b = terrain[hi];
+    var t = (x - a.x) / (b.x - a.x || 1);
+    return lerp(a.y, b.y, t);
+  }
+
+  /** Pad record whose flat top spans x, or null. */
+  function padAt(x) {
+    for (var i = 0; i < pads.length; i++) {
+      var p = pads[i];
+      if (x >= p.x0 && x <= p.x1) return p;
+    }
+    return null;
+  }
+
+  /** True if the segment [x0,x1] lies entirely on one flat pad. */
+  function flatPadUnder(x0, x1) {
+    var p = padAt((x0 + x1) * 0.5);
+    if (!p) return null;
+    if (x0 < p.x0 || x1 > p.x1) return null;   // footprint overhangs the pad
+    return p;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 6. Lander geometry (world-space footprint derived from state)
+   * ------------------------------------------------------------------ */
+
+  /**
+   * Returns the four foot-pad contact points of the lander in world space.
+   * Legs splay to +/- landerLegSpan at the base; body top is landerH above.
+   */
+  function footPoints(st) {
+    var c = Math.cos(st.angle), s = Math.sin(st.angle);
+    var ls = CFG.landerLegSpan;
+    var lh = CFG.landerH;
+    // Local foot offsets relative to lander centre (centre is body mid).
+    var locals = [
+      { x: -ls, y: lh * 0.5 },   // left foot
+      { x:  ls, y: lh * 0.5 }    // right foot
+    ];
+    var pts = [];
+    for (var i = 0; i < locals.length; i++) {
+      var lx = locals[i].x, ly = locals[i].y;
+      pts.push({ x: st.x + lx * c - ly * s, y: st.y + lx * s + ly * c });
+    }
+    return pts;
+  }
+
+  /**
+   * Collision detection: lowest penetration of any contact point against the
+   * terrain surface. Returns {hit, depth, x, y, pad, flat} or null.
+   */
+  function checkCollision(st) {
+    var feet = footPoints(st);
+    var worst = null;
+    for (var i = 0; i < feet.length; i++) {
+      var fx = feet[i].x, fy = feet[i].y;
+      var gy = terrainYAt(fx);
+      var depth = fy - gy;             // >0 means point is below surface
+      if (depth > 0) {
+        if (!worst || depth > worst.depth) {
+          worst = { hit: true, depth: depth, x: fx, y: gy };
+        }
+      }
+    }
+    // Body core check too (nose-dive / inverted).
+    var bodyBottom = st.y + (CFG.landerH * 0.5);
+    var gy2 = terrainYAt(st.x);
+    if (bodyBottom - gy2 > 0) {
+      var d2 = bodyBottom - gy2;
+      if (!worst || d2 > worst.depth) {
+        worst = { hit: true, depth: d2, x: st.x, y: gy2, bodyHit: true };
+      }
+    }
+    if (!worst) return null;
+
+    worst.pad = padAt(worst.x);
+    worst.flat = flatPadUnder(feet[0].x, feet[1].x);
+    return worst;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 7. Landing adjudication + scoring
+   * ------------------------------------------------------------------ */
+  function evaluateLanding(st, hit) {
+    var absV = Math.abs(st.vvel);
+    var absH = Math.abs(st.hvel);
+    var absA = Math.abs(normalizeAngle(st.angle)) * DEG;
+
+    var slowEnough = absV <= CFG.maxSafeVvel;
+    var steadyEnough = absH <= CFG.maxSafeHvel;
+    var uprightEnough = absA <= CFG.maxSafeAngle;
+    // Feet must sit on a flat pad (contract rule 6). A flat, barrens apron is
+    // terrain but NOT a pad -> that counts as a crash (rough ground).
+    var onPad = !!hit.flat;
+
+    if (slowEnough && steadyEnough && uprightEnough && onPad) {
+      // ---- SAFE ----
+      st.status = 'landed';
+      var earned = (hit.flat.value || CFG.scoreBase) + CFG.scoreBase;
+      // Fuel bonus (scaled): scoreFuelBonus points per 10 remaining units.
+      earned += Math.round((st.fuel / 10) * CFG.scoreFuelBonus);
+      // Soft-landing bonus when well inside the envelope.
+      var soft = (absV <= CFG.maxSafeVvel * 0.5) && (absH <= CFG.maxSafeHvel * 0.5);
+      if (soft) earned += CFG.scoreSoftLandingBonus;
+      st.score += earned;
+      st.padValue = hit.flat.value;
+      st.softLanding = soft;
+      st.message = 'LANDED +' + earned + (soft ? ' \u2605SOFT' : '');
+      commitBest();
+      emitEvent('landed', {
+        score: st.score, earned: earned, pad: hit.flat.value,
+        vvel: st.vvel, hvel: st.hvel, angleDeg: absA, soft: soft
+      });
+      return;
+    }
+
+    // ---- CRASH ----
+    st.status = 'crashed';
+    st.crashReason = !onPad ? 'rough terrain'
+                   : !slowEnough ? 'descent too fast'
+                   : !steadyEnough ? 'lateral drift'
+                   : 'tilt too steep';
+    st.message = 'CRASHED \u2014 ' + st.crashReason.toUpperCase();
+    // Freeze kinetic energy visually but keep last velocities for UI readout.
+    st.vx = 0; st.vy = 0; st.angularVelocity = 0;
+    emitEvent('crashed', {
+      reason: st.crashReason, vvel: st.vvel, hvel: st.hvel, angleDeg: absA, onPad: onPad
+    });
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 8. Event emission
+   * ------------------------------------------------------------------ */
+  function makePublicState() {
+    var st = state;
+    return {
+      x: st.x, y: st.y,
+      vx: st.vx, vy: st.vy,
+      angle: st.angle,
+      angularVelocity: st.angularVelocity,
+      thrusting: st.thrusting,
+      throttle: st.throttle,
+      fuel: st.fuel,
+      fuelPct: st.fuelPct,
+      altitude: st.altitude,
+      hvel: st.hvel, vvel: st.vvel,
+      score: st.score,
+      status: st.status,
+      paused: st.paused,
+      terrain: terrain,
+      pads: pads,
+      cameraX: st.cameraX, cameraY: st.cameraY,
+      message: st.message,
+      best: bestScore,
+      padValue: st.padValue,
+      softLanding: st.softLanding,
+      crashReason: st.crashReason
+    };
+  }
+
+  function emitEvent(type, data) {
+    var payload = {
+      type: type,
+      data: data || null,
+      state: API.getState(),
+      best: bestScore
+    };
+    for (var i = 0; i < subscribers.length; i++) {
+      try { subscribers[i](payload); }
+      catch (e) { /* keep the loop alive if a subscriber throws */ }
+    }
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 9. Camera (world -> screen scroll offsets, no rendering)
+   * ------------------------------------------------------------------ */
+  function updateCamera() {
+    if (!CFG.worldScroll) {
+      state.cameraX = 0;
+      state.cameraY = 0;
+      return;
+    }
+    var targetX = state.x - WORLD_W * CFG.holdCenterX;
+    // Eased horizontal follow keeps the lander near holdCenterX.
+    state.cameraX = lerp(state.cameraX, targetX, 1 - CFG.terrainScrollEase);
+    // Vertical: keep lander in lower-middle third, softly.
+    var targetY = state.y - WORLD_H * 0.42;
+    state.cameraY = lerp(state.cameraY, targetY, 0.06);
+    // Clamp camera so the flat launch apron is never pushed off-screen left.
+    if (state.cameraX < -60) state.cameraX = -60;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 10. Reset / spawn
+   * ------------------------------------------------------------------ */
+  function respawn() {
+    seedCounter = (seedCounter + 1) | 0;
+    var seed = (Date.now() ^ (seedCounter * 1103515245)) >>> 0;
+
+    generateTerrain(seed);
+
+    // Spawn high above the launch apron, drifting in slightly.
+    var spawnY = -WORLD_H * 0.55;                    // well above terrain (y up)
+    state = {
+      x: 60,
+      y: spawnY,
+      vx: 6.0,
+      vy: 4.0,
+      angle: 0,
+      angularVelocity: 0,
+      thrusting: false,
+      throttle: 0,
+      fuel: CFG.startFuel,
+      fuelPct: 100,
+      altitude: 0,
+      hvel: 6.0,
+      vvel: 4.0,
+      score: 0,
+      status: 'idle',
+      paused: true,
+      cameraX: 0,
+      cameraY: 0,
+      message: 'TAP PLAY TO BEGIN DESCENT',
+      padValue: null,
+      softLanding: false,
+      crashReason: null
+    };
+    lastMessage = state.message;
+
+    // Input latches
+    input.left = false;
+    input.right = false;
+    input.thrust = false;
+    input.throttleOverride = null;
+
+    // Prime terrain ahead + camera + derived HUD values.
+    extendTerrainTo(state.x + TERRAIN_AHEAD);
+    updateCamera();
+    updateDerived();
+  }
+
+  /** Recompute altitude / hvel / vvel / fuelPct from current state. */
+  function updateDerived() {
+    var st = state;
+    st.hvel = st.vx;
+    st.vvel = st.vy;
+    st.fuelPct = clamp((st.fuel / CFG.startFuel) * 100, 0, 100);
+
+    if (st.status === 'idle' || st.status === 'flying' ||
+        st.status === 'outoffuel' || st.status === 'paused') {
+      var feet = footPoints(st);
+      var lowest = -Infinity;
+      for (var i = 0; i < feet.length; i++) {
+        var d = terrainYAt(feet[i].x) - feet[i].y;   // positive = above ground
+        if (d > lowest) lowest = d;
+      }
+      st.altitude = Math.max(0, lowest);
+    } else if (st.status === 'landed') {
+      st.altitude = 0;
+    }
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 11. Input
+   * ------------------------------------------------------------------ */
+  var input = { left: false, right: false, thrust: false, throttleOverride: null };
+
+  function applyInput(dt) {
+    var st = state;
+
+    // ---- rotation ----
+    var dir = 0;
+    if (input.left) dir -= 1;
+    if (input.right) dir += 1;
+
+    if (dir !== 0) {
+      // Angular velocity target; ease toward it for a weighty gimbal feel.
+      var target = dir * CFG.rotSpeed;
+      st.angularVelocity += (target - st.angularVelocity) * clamp(8 * dt, 0, 1);
+      st.angularVelocity = clamp(st.angularVelocity, -CFG.maxRotSpeed, CFG.maxRotSpeed);
+    } else {
+      // No input: damp toward zero (RCS nulling).
+      st.angularVelocity *= Math.pow(0.02, dt);
+      if (Math.abs(st.angularVelocity) < 1e-4) st.angularVelocity = 0;
+    }
+
+    // Integrate rotation.
+    st.angle = normalizeAngle(st.angle + st.angularVelocity * dt);
+
+    // ---- throttle ----
+    var want = 0;
+    if (input.throttleOverride !== null && input.throttleOverride !== undefined) {
+      want = clamp(input.throttleOverride, 0, CFG.maxThrottle);
+    } else if (input.thrust) {
+      want = CFG.maxThrottle;
+    }
+
+    // Fuel gate: no fuel -> no fire.
+    if (st.fuel <= 0) want = 0;
+
+    // Throttle spool-up/down smoothing (engine response lag).
+    st.throttle += (want - st.throttle) * clamp(10 * dt, 0, 1);
+    if (st.throttle < 0.005) st.throttle = 0;
+    st.thrusting = st.throttle > 0;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 12. Integrator — NEWTONIAN VECTOR PHYSICS (dt-scaled, frame-independent)
+   * ------------------------------------------------------------------ */
+  function integrate(dt) {
+    var st = state;
+    var g = CFG.gravity * CFG.gravityScale;
+
+    // --- 12a. thrust acceleration along facing angle ---
+    // angle 0 = upright; thrust pushes "up" (-y) when upright.
+    var power = CFG.thrustPower * st.throttle;
+    var ax = Math.sin(st.angle) * power;
+    var ay = -Math.cos(st.angle) * power;
+
+    // --- 12b. gravity + thrust accumulate into velocity ---
+    st.vy += (g + ay) * dt;
+    st.vx += ax * dt;
+
+    // --- 12c. position integration (semi-implicit Euler) ---
+    st.x += st.vx * dt;
+    st.y += st.vy * dt;
+
+    // --- 12d. fuel burn ---
+    if (st.throttle > 0) {
+      st.fuel -= CFG.fuelBurnRate * st.throttle * dt;
+    }
+    if (Math.abs(st.angularVelocity) > 0) {
+      st.fuel -= CFG.rotFuelCost * dt;
+    }
+    if (st.fuel <= 0) {
+      st.fuel = 0;
+      st.throttle = 0;
+      st.thrusting = false;
+      if (st.status !== 'crashed' && st.status !== 'landed') {
+        st.status = 'outoffuel';
+      }
+    }
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 13. Public API
+   * ------------------------------------------------------------------ */
+  var API = {
+    init: function (stageEl, config) {
+      stage = stageEl || null;
+      if (config) CFG = resolveConfig(config);
+      if (stage && stage.width) { WORLD_W = stage.width; }
+      if (stage && stage.height) { WORLD_H = stage.height; }
+      bestScore = readBest();
+      if (!state) respawn();
+      return API;
+    },
+
+    reset: function () {
+      bestScore = readBest();      // re-read in case another tab scored
+      respawn();
+      emitEvent('reset', null);
+    },
+
+    update: function (dt) {
+      if (!state) respawn();
+      var st = state;
+
+      // Normalize dt defensively (page-throttle spikes / tab switches).
+      if (typeof dt !== 'number' || !isFinite(dt) || dt <= 0) dt = 1 / 60;
+      dt = clamp(dt, 1 / 240, 0.05);
+
+      if (!st.paused && (st.status === 'idle' || st.status === 'flying' ||
+                         st.status === 'outoffuel')) {
+
+        // Promote idle -> flying on the first live frame.
+        if (st.status === 'idle') st.status = 'flying';
+
+        // Sub-step the integration for stability at low frame rates.
+        var remaining = dt;
+        var step = 1 / 120;
+        while (remaining > 1e-6) {
+          var h = Math.min(step, remaining);
+          applyInput(h);
+          integrate(h);
+          remaining -= h;
+
+          // Terrain streaming: always keep plenty generated ahead.
+          extendTerrainTo(st.x + TERRAIN_AHEAD);
+
+          // --- collision / touchdown ---
+          var hit = checkCollision(st);
+          if (hit) {
+            // Push the lander back out of the surface before adjudicating.
+            st.y -= hit.depth;
+            evaluateLanding(st, hit);
+            break;
+          }
+        }
+      }
+
+      updateCamera();
+      updateDerived();
+
+      // Emit the per-frame state snapshot to subscribers (contract rule).
+      emitEvent('tick', null);
+      return API;
+    },
+
+    start: function () {
+      if (!state) respawn();
+      state.paused = false;
+      if (state.status === 'paused' || state.status === 'idle') {
+        state.status = 'flying';
+      }
+      state.message = 'DESCENT ACTIVE';
+      lastMessage = state.message;
+      emitEvent('start', null);
+      return API;
+    },
+
+    pause: function () {
+      if (!state) return API;
+      state.paused = true;
+      if (state.status === 'flying' || state.status === 'idle') {
+        state.status = 'paused';
+      }
+      state.message = 'PAUSED';
+      lastMessage = state.message;
+      emitEvent('pause', null);
+      return API;
+    },
+
+    isPaused: function () {
+      return state ? !!state.paused : true;
+    },
+
+    getState: function () {
+      if (!state) return null;
+      return makePublicState();
+    },
+
+    setInput: function (inp) {
+      if (!inp || typeof inp !== 'object') return API;
+      if (Object.prototype.hasOwnProperty.call(inp, 'left')) {
+        input.left = !!inp.left;
+      }
+      if (Object.prototype.hasOwnProperty.call(inp, 'right')) {
+        input.right = !!inp.right;
+      }
+      if (Object.prototype.hasOwnProperty.call(inp, 'thrust')) {
+        var t = inp.thrust;
+        if (typeof t === 'number') {
+          // Numeric thrust is interpreted as a 0..1 throttle command.
+          input.throttleOverride = clamp(t, 0, 1);
+          input.thrust = t > 0;
+        } else {
+          input.thrust = !!t;
+          input.throttleOverride = null;
+        }
+      }
+      return API;
+    },
+
+    on: function (callback) {
+      if (typeof callback === 'function') subscribers.push(callback);
+      return API;
+    },
+
+    /* ---- helpful extras (non-contract, additive only) ---- */
+    getBest: function () { return bestScore; },
+    getTerrain: function () { return terrain; },
+    getPads: function () { return pads; },
+    terrainYAt: terrainYAt,
+    padAt: padAt,
+    evaluateLanding: evaluateLanding,
+    _debugFootPoints: function () { return state ? footPoints(state) : null; }
+  };
+
+  /* ------------------------------------------------------------------ *
+   * 14. Export + boot-time self-check
+   * ------------------------------------------------------------------ */
+  window.LanderEngine = API;
+
+  // If LANDER_CONFIG is already present (it is, per load order), initialize
+  // terrain immediately so a renderer that boots sans init still has data.
+  if (window.LANDER_CONFIG) {
+    CFG = resolveConfig(window.LANDER_CONFIG);
+  }
+  respawn();
+
+})(window);
+
+</script>
+<script>
+/* =====================================================================
+ * LUNAR LANDER — ui.js
+ * ---------------------------------------------------------------------
+ * Artifact owner: Vector-Render & UI Engineer (Phase 2)
+ * Implements EXACTLY: window.LanderUI = { init, render, bindControls,
+ *                                        drawVectorScene }
+ *
+ * Interface contract (see CONTRACT.md §5):
+ *   init(canvas, config)                -> void
+ *   render(state)                       -> void
+ *   bindControls(engine)                -> void
+ *   drawVectorScene(ctx, state, terrain)-> void
+ *
+ * Aesthetic: glowing monochrome vector graphics — thin bright strokes on
+ * near-black void, flat colours only (no per-frame gradients / shadowBlur
+ * over many entities), jagged repeating mountains, flat pads with point
+ * labels, lander drawn from body + legs + gimbal (rotated to state.angle),
+ * animated thrust plume.
+ *
+ * Performance:
+ *   - NEVER resize the canvas inside the rAF loop.
+ *   - devicePixelRatio capped: dprCapMobile below liteModeThresholdWidth.
+ *   - DPR/backing-store sync only when the element box changes dimensions.
+ * ===================================================================== */
+(function () {
+  'use strict';
+
+  var DEG = Math.PI / 180;
+  var TAU = Math.PI * 2;
+
+  /* ===================================================================
+   * 1. MODULE STATE
+   * =================================================================== */
+  var canvas = null;      // #stage
+  var ctx = null;         // 2d context
+  var cfg = null;         // window.LANDER_CONFIG
+  var dpr = 1;
+  var cssW = 960;         // css pixel width of the canvas box
+  var cssH = 600;         // css pixel height of the canvas box
+  var lastW = 0, lastH = 0, lastDpr = 0;   // dimension-change detection
+  var booted = false;
+  var bound = false;
+
+  // Starfield (static, generated once for a stable sky).
+  var stars = [];
+  // Camera (smoothed locally for glide; engine also carries cameraX/cameraY).
+  var cam = { x: 0, y: 0, zoom: 1, targetZoom: 1, init: false };
+  // Clock for purely-visual animation (plume flutter, star twinkle, blink).
+  var visualT = 0;
+  var lastRenderStamp = 0;
+  var frameAccum = 0;
+
+  // HUD DOM cache (looked up once).
+  var dom = {
+    alt: null, hvel: null, vvel: null, fuel: null, score: null, msg: null,
+    thrustBar: null, thrustBarFill: null
+  };
+
+  // Contact-flash timers for pad glow.
+  var padPulse = {};       // padIndex -> seconds remaining
+  var lastStatus = '';
+
+  // Terrain draw caches (avoid per-frame Path2D rebuild when camera still).
+  var _terrainCache = { key: '', path: null };
+
+  /* ===================================================================
+   * 2. SMALL MATH / COLOUR HELPERS
+   * =================================================================== */
+  function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
+  function lerp(a, b, t) { return a + (b - a) * t; }
+
+  // Colours come from config; these are the defensive fallbacks.
+  function C(key) {
+    var pal = (cfg && cfg.colors) || {};
+    var fallback = {
+      bg: '#0b1220', void: '#070c17', stroke: '#38bdf8', strokeDim: '#1e4d6b',
+      glow: '#7dd3fc', warn: '#fbbf24', danger: '#f87171', pad: '#4ade80',
+      text: '#f8fafc', muted: '#94a3b8'
+    };
+    return pal[key] || fallback[key] || '#38bdf8';
+  }
+
+  // Convert '#rrggbb' -> 'rgba(r,g,b,a)'. Flat, no gradients.
+  function rgba(hex, a) {
+    if (!hex || hex.charAt(0) !== '#' || hex.length < 7) {
+      return 'rgba(56,189,248,' + a + ')';
+    }
+    var r = parseInt(hex.substr(1, 2), 16);
+    var g = parseInt(hex.substr(3, 2), 16);
+    var b = parseInt(hex.substr(5, 2), 16);
+    return 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
+  }
+
+  function pad3(n) { return (n < 10 ? '00' : (n < 100 ? '0' : '')) + n; }
+
+  /* ===================================================================
+   * 3. STARFIELD
+   * =================================================================== */
+  function seedStars() {
+    stars.length = 0;
+    // Deterministic pseudo-random so the sky is stable across resets.
+    var seed = 1337;
+    function rnd() {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return (seed % 100000) / 100000;
+    }
+    var count = 130;
+    for (var i = 0; i < count; i++) {
+      stars.push({
+        x: rnd(),                        // 0..1 of viewport width
+        y: rnd() * 0.82,                 // keep stars above the horizon
+        r: 0.5 + rnd() * 1.1,
+        // twinkle phase + speed
+        p: rnd() * TAU,
+        s: 0.4 + rnd() * 1.6,
+        a: 0.25 + rnd() * 0.55
+      });
+    }
+  }
+
+  /* ===================================================================
+   * 4. CANVAS / DPR SIZING  (resize ONLY on dimension change)
+   * =================================================================== */
+  function isLite() {
+    return (window.innerWidth || 9999) <
+      ((cfg && cfg.liteModeThresholdWidth) || 820);
+  }
+
+  function capDpr() {
+    var cap = isLite()
+      ? ((cfg && cfg.dprCapMobile) || 1.5)
+      : ((cfg && cfg.dprCapDesk) || 2.0);
+    var raw = window.devicePixelRatio || 1;
+    return Math.min(raw, cap);
+  }
+
+  // Returns true when the backing store was (re)allocated.
+  function syncCanvasSize() {
+    if (!canvas) { return false; }
+    var rect = canvas.getBoundingClientRect();
+    // Fall back to intrinsic/attr size if layout reports zero (offscreen).
+    var w = Math.round(rect.width) || canvas.width || 960;
+    var h = Math.round(rect.height) || canvas.height || 600;
+    var nextDpr = capDpr();
+
+    if (w === lastW && h === lastH && nextDpr === lastDpr) {
+      return false;                       // no change -> do nothing
+    }
+    lastW = w; lastH = h; lastDpr = nextDpr;
+    cssW = w; cssH = h; dpr = nextDpr;
+
+    canvas.width = Math.max(1, Math.round(w * dpr));
+    canvas.height = Math.max(1, Math.round(h * dpr));
+    return true;
+  }
+
+  /* ===================================================================
+   * 5. CAMERA
+   * -------------------------------------------------------------------
+   * Classic Lunar Lander behaviour: keep the craft near holdCenterX of
+   * the viewport and zoom IN as it approaches the ground (small altitude)
+   * so the final feet-to-pad alignment is legible.
+   * =================================================================== */
+  function updateCamera(state) {
+    var holdX = (cfg && cfg.holdCenterX) != null ? cfg.holdCenterX : 0.5;
+
+    // Prefer the engine's authoritative camera when supplied.
+    var engCamX = (state && typeof state.cameraX === 'number') ? state.cameraX : null;
+    var engCamY = (state && typeof state.cameraY === 'number') ? state.cameraY : null;
+    var lx = (state && typeof state.x === 'number') ? state.x : 480;
+    var ly = (state && typeof state.y === 'number') ? state.y : 200;
+
+    // Target scroll so lander x maps to holdCenterX of the viewport.
+    var targetX = lx - (cssW * holdX);
+
+    // Altitude-aware zoom: full zoom-out high up, tight zoom near terrain.
+    var alt = (state && typeof state.altitude === 'number') ? state.altitude : 400;
+    var zNear = 1.55, zFar = 0.92;
+    var t = clamp(alt / 320, 0, 1);            // 0 = on ground, 1 = high
+    var targetZoom = lerp(zNear, zFar, t);
+
+    // Vertical framing: bias so the lander sits a little below centre,
+    // revealing the descending terrain ahead.
+    var targetY = ly - (cssH * 0.42) / targetZoom;
+
+    if (!cam.init) {
+      cam.x = (engCamX != null) ? engCamX : targetX;
+      cam.y = (engCamY != null) ? engCamY : targetY;
+      cam.zoom = cam.targetZoom = targetZoom;
+      cam.init = true;
+      return;
+    }
+
+    var ease = (cfg && cfg.terrainScrollEase) || 0.85;
+    // Horizontal follow: soften the classic ease into per-frame damping.
+    var kx = clamp(1 - Math.pow(ease, 0.016 * 60 / 60), 0.02, 0.5);
+    var baseX = (engCamX != null) ? engCamX : targetX;
+    var baseY = (engCamY != null) ? engCamY : targetY;
+
+    cam.x = lerp(cam.x, baseX, 0.18);
+    cam.y = lerp(cam.y, baseY, 0.14);
+    cam.zoom = lerp(cam.zoom, targetZoom, 0.06);
+    cam.targetZoom = targetZoom;
+    void kx;
+  }
+
+  /* ===================================================================
+   * 6. PURE VECTOR RASTER — drawVectorScene(ctx, state, terrain)
+   * =================================================================== */
+  function drawVectorScene(context, state, terrain) {
+    var c = context || ctx;
+    if (!c) { return; }
+
+    var W = cssW, H = cssH;
+    var lx = (state && typeof state.x === 'number') ? state.x : 480;
+    var ly = (state && typeof state.y === 'number') ? state.y : 240;
+    var zoom = cam.zoom || 1;
+
+    // --- Void background (flat fill, no gradient) ---------------------
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.clearRect(0, 0, canvas.width, canvas.height);
+    c.fillStyle = C('void');
+    c.fillRect(0, 0, canvas.width, canvas.height);
+
+    c.save();
+    c.scale(dpr, dpr);
+
+    // --- Starfield (drawn in screen space, subtle parallax by camera) --
+    drawStars(c, W, H);
+
+    // --- World transform: camera scroll + altitude zoom ----------------
+    c.save();
+    // Zoom about the horizontal hold point, and about screen centre Y.
+    c.translate(W * 0.5, H * 0.5);
+    c.scale(zoom, zoom);
+    c.translate(-W * 0.5, -H * 0.5);
+    c.translate(-cam.x, -cam.y);
+
+    // --- Terrain + pads -----------------------------------------------
+    drawTerrain(c, terrain, cam.x, W);
+
+    // --- Lander module -------------------------------------------------
+    if (state) {
+      drawLander(c, state);
+    }
+
+    c.restore();   // world transform
+
+    // --- Screen-space overlays (reticle, contact flash) ---------------
+    drawOverlays(c, state, W, H);
+
+    c.restore();   // dpr scale
+  }
+
+  /* ---- Stars -------------------------------------------------------- */
+  function drawStars(c, W, H) {
+    var px = -(cam.x * 0.02);   // gentle parallax drift
+    c.fillStyle = rgba(C('glow'), 0.85);
+    for (var i = 0; i < stars.length; i++) {
+      var s = stars[i];
+      var tw = 0.55 + 0.45 * Math.sin(visualT * s.s + s.p);
+      var a = s.a * tw;
+      var x = s.x * W + px;
+      // wrap for endless horizontal parallax
+      x = ((x % W) + W) % W;
+      var y = s.y * H;
+      c.globalAlpha = a;
+      c.fillRect(x, y, s.r, s.r);
+    }
+    c.globalAlpha = 1;
+  }
+
+  /* ---- Terrain ------------------------------------------------------
+   * `terrain` = array of {x, y, pad:null|{value,halfWidth,index}}
+   * Repeating jagged mountains; flat pads drawn in colors.pad with
+   * point-value labels above each pad centre.
+   * ------------------------------------------------------------------ */
+  function drawTerrain(c, terrain, camX, W) {
+    c.lineJoin = 'round';
+    c.lineCap = 'round';
+
+    // --- Baselines / horizon glow (single flat stroke) ----------------
+    var baseY = 560;
+    if (terrain && terrain.length) {
+      baseY = terrain[0].y;
+    }
+
+    if (!terrain || !terrain.length) {
+      // Defensive fallback: a flat ridge so the scene is never empty.
+      c.strokeStyle = C('strokeDim');
+      c.lineWidth = 1;
+      c.beginPath();
+      c.moveTo(camX - 20, baseY);
+      c.lineTo(camX + W + 20, baseY);
+      c.stroke();
+      return;
+    }
+
+    // ---- Build the mountain silhouette path --------------------------
+    var path = new Path2D();
+    path.moveTo(terrain[0].x, terrain[0].y);
+    for (var i = 1; i < terrain.length; i++) {
+      path.lineTo(terrain[i].x, terrain[i].y);
+    }
+
+    // ---- Soft glow under-stroke (one wide translucent pass) ----------
+    // Deliberately ONE pass, not per-entity shadowBlur.
+    c.strokeStyle = rgba(C('stroke'), 0.14);
+    c.lineWidth = 6;
+    c.stroke(path);
+
+    // ---- Main bright silhouette line ---------------------------------
+    c.strokeStyle = C('strokeDim');
+    c.lineWidth = 1.25;
+    c.stroke(path);
+
+    // ---- Fill below the ridge (flat translucent body) ----------------
+    var fill = new Path2D(path);
+    var lastX = terrain[terrain.length - 1].x;
+    var bottom = 4000;
+    fill.lineTo(lastX, bottom);
+    fill.lineTo(terrain[0].x, bottom);
+    fill.closePath();
+    c.fillStyle = rgba(C('void'), 0.92);
+    c.fill(fill);
+    // faint interior hatching tint for volume
+    c.fillStyle = rgba(C('stroke'), 0.035);
+    c.fill(fill);
+
+    // ---- Pads --------------------------------------------------------
+    for (var j = 0; j < terrain.length; j++) {
+      var p = terrain[j];
+      if (!p.pad) { continue; }
+      var hw = p.pad.halfWidth || 20;
+      var pi = (p.pad.index != null) ? p.pad.index : j;
+      var pulse = padPulse[pi] || 0;
+
+      // Flat pad segment (bright flat colour).
+      c.strokeStyle = C('pad');
+      c.lineWidth = 3;
+      c.lineCap = 'butt';
+      c.beginPath();
+      c.moveTo(p.x - hw, p.y);
+      c.lineTo(p.x + hw, p.y);
+      c.stroke();
+
+      // Glow pass for the pad only (cheap, few pads).
+      c.strokeStyle = rgba(C('pad'), 0.20);
+      c.lineWidth = 9;
+      c.beginPath();
+      c.moveTo(p.x - hw, p.y);
+      c.lineTo(p.x + hw, p.y);
+      c.stroke();
+
+      // Landing-corridor tick marks (short verticals bracketing the pad).
+      c.strokeStyle = rgba(C('pad'), 0.55);
+      c.lineWidth = 1;
+      c.beginPath();
+      c.moveTo(p.x - hw, p.y);
+      c.lineTo(p.x - hw, p.y - 6);
+      c.moveTo(p.x + hw, p.y);
+      c.lineTo(p.x + hw, p.y - 6);
+      c.stroke();
+
+      // Contact flash ring when recently touched.
+      if (pulse > 0) {
+        c.strokeStyle = rgba(C('pad'), clamp(pulse / 0.6, 0, 1) * 0.9);
+        c.lineWidth = 1.5;
+        c.beginPath();
+        c.moveTo(p.x, p.y);
+        c.lineTo(p.x, p.y - 26 * (1.2 - clamp(pulse / 0.6, 0, 1)));
+        c.stroke();
+      }
+
+      // Point-value label (flat text, no blur).
+      c.fillStyle = C('pad');
+      c.font = '700 12px ui-monospace, "SF Mono", Menlo, Consolas, monospace';
+      c.textAlign = 'center';
+      c.textBaseline = 'alphabetic';
+      c.fillText(String(p.pad.value != null ? p.pad.value : ''), p.x, p.y + 15);
+      c.lineCap = 'round';
+    }
+  }
+
+  /* ---- Lander module ------------------------------------------------
+   * Body (octagon hull) + landing legs + gimbal engine bell + thruster
+   * flame when thrusting; entire rig rotated by state.angle.
+   * ------------------------------------------------------------------ */
+  function drawLander(c, state) {
+    var w = (cfg && cfg.landerW) || 16;
+    var h = (cfg && cfg.landerH) || 20;
+    var leg = (cfg && cfg.landerLegSpan) || 11;
+    var angle = (typeof state.angle === 'number') ? state.angle : 0;
+    var thrusting = !!state.thrusting;
+    var status = state.status || 'flying';
+
+    var line = C('stroke');
+    if (status === 'crashed') { line = C('danger'); }
+    else if (status === 'outoffuel') { line = C('warn'); }
+
+    c.save();
+    c.translate(state.x, state.y);
+    c.rotate(angle);
+
+    c.lineJoin = 'round';
+    c.lineCap = 'round';
+
+    // --- Outer glow under-stroke (one pass for the whole craft) -------
+    c.strokeStyle = rgba(line, 0.16);
+    c.lineWidth = 6;
+    strokeCraft(c, w, h, leg);
+
+    // --- Crisp bright outline -----------------------------------------
+    c.strokeStyle = line;
+    c.lineWidth = 1.6;
+    strokeCraft(c, w, h, leg);
+
+    // --- Hull interior (flat dark fill) -------------------------------
+    var hw = w * 0.5, hh = h * 0.5;
+    c.fillStyle = rgba(C('void'), 0.85);
+    c.beginPath();
+    c.moveTo(-hw, -hh);
+    c.lineTo(hw, -hh);
+    c.lineTo(hw, hh);
+    c.lineTo(-hw, hh);
+    c.closePath();
+    c.fill();
+
+    // --- Porthole -----------------------------------------------------
+    c.strokeStyle = rgba(C('glow'), 0.9);
+    c.lineWidth = 1.2;
+    c.beginPath();
+    c.arc(0, -hh + h * 0.32, Math.max(1.5, w * 0.14), 0, TAU);
+    c.stroke();
+    c.fillStyle = rgba(C('glow'), 0.22);
+    c.fill();
+
+    // --- Engine bell at base ------------------------------------------
+    c.strokeStyle = line;
+    c.lineWidth = 1.3;
+    c.beginPath();
+    c.moveTo(-hw * 0.55, hh);
+    c.lineTo(-hw * 0.40, hh + 4);
+    c.lineTo(hw * 0.40, hh + 4);
+    c.lineTo(hw * 0.55, hh);
+    c.stroke();
+
+    // --- Thrust plume (animated, flat two-tone vectors) ---------------
+    if (thrusting && status !== 'crashed' && status !== 'landed') {
+      var thr = (typeof state.throttle === 'number') ? clamp(state.throttle, 0, 1) : 1;
+      drawPlume(c, w, h, thr);
+    }
+
+    // --- Status glyphs -------------------------------------------------
+    if (status === 'crashed') {
+      // X over the craft
+      c.strokeStyle = C('danger');
+      c.lineWidth = 2;
+      c.beginPath();
+      c.moveTo(-hw - 4, -hh - 4); c.lineTo(hw + 4, hh + 4);
+      c.moveTo(hw + 4, -hh - 4); c.lineTo(-hw - 4, hh + 4);
+      c.stroke();
+    } else if (status === 'landed') {
+      c.strokeStyle = C('pad');
+      c.lineWidth = 2;
+      c.beginPath();
+      c.arc(0, 0, hh + 8, 0, TAU);
+      c.stroke();
+    }
+
+    c.restore();
+  }
+
+  // Hull + legs geometry in lander-local space (y up = negative).
+  function strokeCraft(c, w, h, leg) {
+    var hw = w * 0.5, hh = h * 0.5;
+    c.beginPath();
+    // Hull octagon-ish module
+    c.moveTo(-hw, -hh + 3);
+    c.lineTo(-hw + 3, -hh);
+    c.lineTo(hw - 3, -hh);
+    c.lineTo(hw, -hh + 3);
+    c.lineTo(hw, hh - 2);
+    c.lineTo(hw - 2, hh);
+    c.lineTo(-hw + 2, hh);
+    c.lineTo(-hw, hh - 2);
+    c.closePath();
+    // Landing legs (strut + foot)
+    c.moveTo(-hw, hh - 2);
+    c.lineTo(-leg, hh + 9);
+    c.lineTo(-leg + 5, hh + 9);
+    c.moveTo(hw, hh - 2);
+    c.lineTo(leg, hh + 9);
+    c.lineTo(leg - 5, hh + 9);
+    c.stroke();
+  }
+
+  // Animated exhaust plume beneath the bell (flat colours only).
+  function drawPlume(c, w, h, thr) {
+    var hh = h * 0.5;
+    var baseY = hh + 4;
+    var flick = 0.75 + 0.25 * Math.sin(visualT * 42);
+    var len = (16 + 34 * thr) * flick;
+    var halfW = 2.4 + 3.2 * thr;
+
+    // Outer plume
+    c.fillStyle = rgba(C('glow'), 0.30 * (0.6 + 0.4 * thr));
+    c.beginPath();
+    c.moveTo(-halfW, baseY);
+    c.lineTo(halfW, baseY);
+    c.lineTo(halfW * 0.25, baseY + len);
+    c.lineTo(-halfW * 0.25, baseY + len);
+    c.closePath();
+    c.fill();
+
+    // Core flame
+    c.fillStyle = rgba(C('stroke'), 0.85);
+    c.beginPath();
+    c.moveTo(-halfW * 0.45, baseY);
+    c.lineTo(halfW * 0.45, baseY);
+    c.lineTo(0, baseY + len * 0.72);
+    c.closePath();
+    c.fill();
+
+    // Inner hot core
+    c.fillStyle = rgba(C('text'), 0.7 * thr);
+    c.beginPath();
+    c.moveTo(-halfW * 0.22, baseY);
+    c.lineTo(halfW * 0.22, baseY);
+    c.lineTo(0, baseY + len * 0.42);
+    c.closePath();
+    c.fill();
+  }
+
+  /* ---- Screen-space overlays ---------------------------------------- */
+  function drawOverlays(c, state, W, H) {
+    if (!state) { return; }
+
+    // Velocity vector indicator (classic vector-graphics HUD line).
+    var vx = state.vx || 0, vy = state.vy || 0;
+    var mag = Math.sqrt(vx * vx + vy * vy);
+    if (mag > 0.5) {
+      var lx = state.x - cam.x;
+      // approximate projected position (ignore small zoom delta for overlay)
+      lx = W * 0.5 + (lx - W * 0.5) * (cam.zoom || 1);
+      var ly = state.y - cam.y;
+      ly = H * 0.5 + (ly - H * 0.5) * (cam.zoom || 1);
+
+      var scale = Math.min(3.2, 60 / Math.max(mag, 1));
+      var ex = lx + vx * scale, ey = ly + vy * scale;
+
+      var col = (Math.abs(vx) > ((cfg && cfg.maxSafeHvel) || 12) ||
+        Math.abs(vy) > ((cfg && cfg.maxSafeVvel) || 28)) ? C('danger') : C('glow');
+      c.strokeStyle = rgba(col, 0.75);
+      c.lineWidth = 1.25;
+      c.beginPath();
+      c.moveTo(lx, ly);
+      c.lineTo(ex, ey);
+      c.stroke();
+      // arrow head
+      var ang = Math.atan2(ey - ly, ex - lx);
+      c.beginPath();
+      c.moveTo(ex, ey);
+      c.lineTo(ex - 5 * Math.cos(ang - 0.4), ey - 5 * Math.sin(ang - 0.4));
+      c.moveTo(ex, ey);
+      c.lineTo(ex - 5 * Math.cos(ang + 0.4), ey - 5 * Math.sin(ang + 0.4));
+      c.stroke();
+    }
+
+    // Altitude ladder ticks on the right edge (thin, flat).
+    var alt = state.altitude || 0;
+    c.strokeStyle = rgba(C('stroke'), 0.18);
+    c.lineWidth = 1;
+    for (var g = 0; g < 6; g++) {
+      var yy = H - 20 - g * 18;
+      c.beginPath();
+      c.moveTo(W - 10, yy);
+      c.lineTo(W - 22, yy);
+      c.stroke();
+    }
+    c.fillStyle = rgba(C('muted'), 0.7);
+    c.font = '600 10px ui-monospace, Menlo, Consolas, monospace';
+    c.textAlign = 'right';
+    c.textBaseline = 'middle';
+    c.fillText(Math.round(alt) + ' m', W - 26, H - 20);
+  }
+
+  /* ===================================================================
+   * 7. HUD DOM RENDER — render(state)
+   * =================================================================== */
+  function render(state) {
+    if (!state) { return; }
+
+    // --- numeric readouts ---------------------------------------------
+    setText(dom.alt, String(Math.round(state.altitude || 0)));
+    setText(dom.hvel, fmtVel(state.hvel != null ? state.hvel : state.vx));
+    setText(dom.vvel, fmtVel(state.vvel != null ? state.vvel : state.vy));
+    setText(dom.fuel, String(Math.max(0, Math.round(state.fuel || 0))));
+    setText(dom.score, String(Math.round(state.score || 0)));
+
+    // --- colour-code velocity cells against the safety envelope -------
+    paintVelocity(dom.hvel, Math.abs(state.hvel != null ? state.hvel : state.vx || 0),
+      (cfg && cfg.maxSafeHvel) || 12);
+    paintVelocity(dom.vvel, Math.abs(state.vvel != null ? state.vvel : state.vy || 0),
+      (cfg && cfg.maxSafeVvel) || 28);
+
+    // --- fuel gauge ---------------------------------------------------
+    var pct = (typeof state.fuelPct === 'number')
+      ? clamp(state.fuelPct, 0, 100)
+      : clamp(((state.fuel || 0) / ((cfg && cfg.startFuel) || 1000)) * 100, 0, 100);
+
+    if (dom.thrustBarFill) {
+      dom.thrustBarFill.style.width = pct.toFixed(1) + '%';
+      // colour band the gauge
+      dom.thrustBarFill.style.backgroundColor =
+        pct <= 15 ? C('danger') : (pct <= 35 ? C('warn') : C('stroke'));
+    }
+    if (dom.thrustBar) {
+      dom.thrustBar.setAttribute('aria-valuenow', String(Math.round(pct)));
+      dom.thrustBar.classList.toggle('is-low', pct <= 35 && pct > 15);
+      dom.thrustBar.classList.toggle('is-critical', pct <= 15);
+    }
+    if (dom.fuel) {
+      dom.fuel.style.color = pct <= 15 ? C('danger') : (pct <= 35 ? C('warn') : '');
+    }
+
+    // --- status message -----------------------------------------------
+    var msg = state.message;
+    if (!msg) {
+      msg = ({
+        idle: 'TAP PLAY TO BEGIN DESCENT',
+        flying: 'DESCENT IN PROGRESS',
+        landed: 'TOUCHDOWN CONFIRMED',
+        crashed: 'HULL BREACH — RESET TO RETRY',
+        outoffuel: 'FUEL DEPLETED',
+        paused: 'PAUSED'
+      })[state.status] || '';
+    }
+    if (msg !== lastStatus) {
+      lastStatus = msg;
+      setText(dom.msg, msg);
+      if (dom.msg) {
+        dom.msg.classList.remove('flash');
+        // force reflow to restart CSS animation
+        void dom.msg.offsetWidth;
+        dom.msg.classList.add('flash');
+      }
+      // pad contact feedback
+      if (state.status === 'landed') { pulseAllPads(); }
+    }
+
+    // --- body state classes for CSS-driven chrome ---------------------
+    if (document.body) {
+      document.body.classList.toggle('is-flying', state.status === 'flying');
+      document.body.classList.toggle('is-landed', state.status === 'landed');
+      document.body.classList.toggle('is-crashed', state.status === 'crashed');
+      document.body.classList.toggle('is-paused', !!state.paused);
+    }
+
+    // --- pad pulse decay ----------------------------------------------
+    for (var k in padPulse) {
+      if (!padPulse.hasOwnProperty(k)) { continue; }
+      padPulse[k] -= 0.016;
+      if (padPulse[k] <= 0) { delete padPulse[k]; }
+    }
+  }
+
+  function setText(el, txt) {
+    if (el && el.textContent !== txt) { el.textContent = txt; }
+  }
+
+  function fmtVel(v) {
+    var n = (typeof v === 'number' && isFinite(v)) ? v : 0;
+    return (n >= 0 ? '+' : '') + n.toFixed(1);
+  }
+
+  function paintVelocity(el, mag, limit) {
+    if (!el) { return; }
+    if (mag > limit) {
+      el.style.color = C('danger');
+      el.classList.add('over-limit');
+    } else if (mag > limit * 0.7) {
+      el.style.color = C('warn');
+      el.classList.remove('over-limit');
+    } else {
+      el.style.color = '';
+      el.classList.remove('over-limit');
+    }
+  }
+
+  function pulseAllPads() {
+    padPulse.__all = 0.6;
+  }
+
+  /* ===================================================================
+   * 8. CONTROL BINDINGS — bindControls(engine)
+   * =================================================================== */
+  function bindControls(engine) {
+    if (!engine || bound) { return; }
+    bound = true;
+
+    var input = { left: false, right: false, thrust: false };
+
+    function push() {
+      if (engine.setInput) {
+        engine.setInput({
+          left: input.left,
+          right: input.right,
+          thrust: input.thrust
+        });
+      }
+    }
+
+    // ---- Hold-button helper: pointer + touch + mouse fallback --------
+    function holdButton(el, key) {
+      if (!el) { return; }
+      var active = false;
+
+      function on() {
+        if (active) { return; }
+        active = true;
+        input[key] = true;
+        el.classList.add('is-active');
+        push();
+        // keyboard focus hygiene — don't leave buttons focused
+        if (el.blur) { el.blur(); }
+      }
+      function off() {
+        if (!active) { return; }
+        active = false;
+        input[key] = false;
+        el.classList.remove('is-active');
+        push();
+      }
+
+      if (window.PointerEvent) {
+        el.addEventListener('pointerdown', function (e) {
+          e.preventDefault();
+          try { el.setPointerCapture(e.pointerId); } catch (err) { /* noop */ }
+          on();
+        }, { passive: false });
+        el.addEventListener('pointerup', function (e) { e.preventDefault(); off(); }, { passive: false });
+        el.addEventListener('pointercancel', function () { off(); });
+        el.addEventListener('pointerleave', function () { off(); });
+        el.addEventListener('lostpointercapture', function () { off(); });
+      } else {
+        // Legacy: separate touch + mouse paths.
+        el.addEventListener('touchstart', function (e) { e.preventDefault(); on(); }, { passive: false });
+        el.addEventListener('touchend', function (e) { e.preventDefault(); off(); }, { passive: false });
+        el.addEventListener('touchcancel', function () { off(); });
+        el.addEventListener('mousedown', function (e) { e.preventDefault(); on(); });
+        el.addEventListener('mouseup', function () { off(); });
+        el.addEventListener('mouseleave', function () { off(); });
+      }
+
+      // Guard against a stuck input if the page loses focus.
+      window.addEventListener('blur', off);
+      document.addEventListener('visibilitychange', function () {
+        if (document.hidden) { off(); }
+      });
+      // Expose for reset
+      el.__holdOff = off;
+
+      return el;
+    }
+
+    // ---- Action buttons (click) --------------------------------------
+    function clickButton(el, fn) {
+      if (!el) { return; }
+      el.addEventListener('click', function (e) {
+        e.preventDefault();
+        if (el.blur) { el.blur(); }
+        fn();
+      });
+    }
+
+    var btnLeft = document.getElementById('btnLeft');
+    var btnRight = document.getElementById('btnRight');
+    var btnThrust = document.getElementById('btnThrust');
+    var btnPlay = document.getElementById('btnPlay');
+    var btnPause = document.getElementById('btnPause');
+    var btnReset = document.getElementById('btnReset');
+
+    holdButton(btnLeft, 'left');
+    holdButton(btnRight, 'right');
+    holdButton(btnThrust, 'thrust');
+
+    clickButton(btnPlay, function () { if (engine.start) { engine.start(); } });
+    clickButton(btnPause, function () { if (engine.pause) { engine.pause(); } });
+    clickButton(btnReset, function () {
+      // release any held inputs first so we don't resume thrusting
+      input.left = input.right = input.thrust = false;
+      [btnLeft, btnRight, btnThrust].forEach(function (b) {
+        if (b && b.classList) { b.classList.remove('is-active'); }
+        if (b && b.__holdOff) { b.__holdOff(); }
+      });
+      push();
+      if (engine.reset) { engine.reset(); }
+      cam.init = false;        // re-snap the camera on the next frame
+      padPulse = {};
+      lastStatus = '';
+    });
+
+    // ---- Keyboard (arrows / space, plus WASD + P/R niceties) ---------
+    var keyMap = {
+      ArrowLeft: 'left', KeyA: 'left',
+      ArrowRight: 'right', KeyD: 'right',
+      ArrowUp: 'thrust', Space: 'thrust', KeyW: 'thrust'
+    };
+
+    function onKeyDown(e) {
+      var key = keyMap[e.code];
+      if (key) {
+        e.preventDefault();
+        if (!input[key]) {
+          input[key] = true;
+          setBtnVisual(key, true);
+          push();
+        }
+        return;
+      }
+      // Discrete actions
+      if (e.code === 'KeyP' || e.code === 'Pause') {
+        e.preventDefault();
+        if (engine.isPaused && engine.isPaused()) {
+          if (engine.start) { engine.start(); }
+        } else if (engine.pause) {
+          engine.pause();
+        }
+      } else if (e.code === 'KeyR') {
+        e.preventDefault();
+        if (btnReset) { btnReset.click(); }
+      } else if (e.code === 'Enter') {
+        e.preventDefault();
+        if (!engine.isPaused || !engine.isPaused()) {
+          if (engine.start) { engine.start(); }
+        }
+      }
+    }
+
+    function onKeyUp(e) {
+      var key = keyMap[e.code];
+      if (key) {
+        e.preventDefault();
+        if (input[key]) {
+          input[key] = false;
+          setBtnVisual(key, false);
+          push();
+        }
+      }
+    }
+
+    function setBtnVisual(key, on) {
+      var map = { left: btnLeft, right: btnRight, thrust: btnThrust };
+      var b = map[key];
+      if (b && b.classList) { b.classList.toggle('is-active', on); }
+    }
+
+    window.addEventListener('keydown', onKeyDown, { passive: false });
+    window.addEventListener('keyup', onKeyUp, { passive: false });
+
+    // ---- Blur safety: release everything -----------------------------
+    window.addEventListener('blur', function () {
+      input.left = input.right = input.thrust = false;
+      push();
+    });
+
+    // ---- Expose a teardown hook (idempotency friendly) ---------------
+    engine.__uiUnbind = function () {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      bound = false;
+    };
+  }
+
+  /* ===================================================================
+   * 9. INIT — init(canvas, config)
+   * =================================================================== */
+  function init(stageCanvas, config) {
+    if (!stageCanvas) { return; }
+    canvas = stageCanvas;
+    cfg = config || window.LANDER_CONFIG || {};
+    var context = canvas.getContext('2d', { alpha: false });
+    ctx = context || canvas.getContext('2d');
+    if (!ctx) { return; }
+
+    // Try to coax crisp thin lines out of the rasteriser.
+    ctx.imageSmoothingEnabled = true;
+
+    dpr = capDpr();
+    syncCanvasSize();
+    seedStars();
+
+    // HUD cache.
+    dom.alt = document.getElementById('hudAlt');
+    dom.hvel = document.getElementById('hudHvel');
+    dom.vvel = document.getElementById('hudVvel');
+    dom.fuel = document.getElementById('hudFuel');
+    dom.score = document.getElementById('hudScore');
+    dom.msg = document.getElementById('hudMsg');
+    dom.thrustBar = document.getElementById('thrustBar');
+    dom.thrustBarFill = document.getElementById('thrustBarFill');
+
+    // Canvas resize ONLY when the box dimension actually changes.
+    var onResize = function () {
+      var changed = syncCanvasSize();
+      if (changed) { cam.init = false; }   // re-snap camera after layout shift
+    };
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', function () {
+      setTimeout(onResize, 120);
+    });
+    if (window.ResizeObserver) {
+      try {
+        var ro = new ResizeObserver(onResize);
+        ro.observe(canvas);
+      } catch (err) { /* noop */ }
+    }
+
+    // Visibility: pause raster pressure when hidden (clock reset on return).
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden) { lastRenderStamp = 0; }
+    });
+
+    window.LanderUI.__ctx = ctx;
+    window.LanderUI.__syncCanvasSize = syncCanvasSize;
+  }
+
+  /* ===================================================================
+   * 10. INTERNAL rAF SHIM (used when the integrator wants UI to drive)
+   * =================================================================== */
+  function tickVisual(dt) {
+    visualT += dt;
+  }
+
+  /* ===================================================================
+   * 11. PUBLIC API
+   * =================================================================== */
+  window.LanderUI = window.LanderUI || {};
+  window.LanderUI.init = init;
+  window.LanderUI.render = render;
+  window.LanderUI.bindControls = bindControls;
+  window.LanderUI.drawVectorScene = drawVectorScene;
+
+  // Exposed helpers (non-contract, additive only — safe for the integrator).
+  window.LanderUI.tickVisual = tickVisual;
+  window.LanderUI.updateCamera = updateCamera;
+  window.LanderUI.syncCanvasSize = syncCanvasSize;
+  window.LanderUI.pulsePad = function (i) { padPulse[i] = 0.6; };
+  window.LanderUI.getCamera = function () { return cam; };
+  window.LanderUI.getDpr = function () { return dpr; };
+  window.LanderUI.getCssSize = function () { return { w: cssW, h: cssH }; };
+  window.LanderUI.VERSION = (window.LANDER_CONFIG && window.LANDER_CONFIG.VERSION) || '1.0.0';
+
+  /* ===================================================================
+   * 12. BOOT (idempotent) — per CONTRACT.md §6
+   * ui.js calls Engine.init + UI.init then bindControls on DOM ready.
+   * =================================================================== */
+  function boot() {
+    var stage = document.getElementById('stage');
+    if (!stage) { return; }
+    var config = window.LANDER_CONFIG || {};
+
+    init(stage, config);
+
+    if (window.LanderEngine) {
+      if (!window.LanderEngine.__booted) {
+        if (window.LanderEngine.init) {
+          window.LanderEngine.init(stage, config);
+        }
+        window.LanderEngine.__booted = true;
+      }
+      bindControls(window.LanderEngine);
+    }
+
+    // Idempotent global boot flag for Phase 3 integrator.
+    if (!booted) {
+      booted = true;
+      window.__LANDER_UI_BOOTED = true;
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot, { once: true });
+  } else {
+    // engine.js/ui.js are `defer` — by the time this runs the DOM is parsed,
+    // but engine.js may not have executed yet depending on ordering. Give it
+    // one macrotask so both modules are present, then boot.
+    setTimeout(boot, 0);
+  }
+
+})();
+
+</script>
+</body>
+</html>
